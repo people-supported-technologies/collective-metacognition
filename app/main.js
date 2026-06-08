@@ -5,9 +5,21 @@
     const data = await d3.json("graph_data.json");
     if (!data) { console.error("Failed to load graph_data.json"); return; }
 
-    const { nodes, raw_edges, metadata } = data;
+    const { nodes, raw_edges, metadata, participant_demographics = {} } = data;
 
     // Populate filter dropdowns
+    const affiliationOptions = metadata.demographic_filters?.political_affiliation || [
+        { value: "all", label: "All participants", count: metadata.speakers?.length || 0 },
+    ];
+    populateSelect(
+        "filter-demographic",
+        affiliationOptions.map(opt => ({
+            value: opt.value,
+            label: opt.edge_count != null
+                ? `${opt.label} (${opt.edge_count} edges)`
+                : opt.label,
+        })),
+    );
     populateSelect("filter-round", metadata.rounds.map(r => ({ value: r, label: `Round ${r}` })));
     populateSelect("filter-table", metadata.tables.map(t => ({ value: t, label: t.slice(0, 8) })));
     populateSelect("filter-speaker", metadata.speakers.map(s => ({ value: s, label: s.slice(0, 12) })));
@@ -92,7 +104,12 @@
     }
     function closeModal() { modalOverlay.classList.remove("active"); }
 
+    function getParticipantAffiliation(participantId) {
+        return participant_demographics[participantId]?.political_affiliation || "Unknown";
+    }
+
     function getFilteredEdges() {
+        const demographic = document.getElementById("filter-demographic").value;
         const round = document.getElementById("filter-round").value;
         const table = document.getElementById("filter-table").value;
         const speaker = document.getElementById("filter-speaker").value;
@@ -100,7 +117,15 @@
         const stance = document.getElementById("filter-stance").value;
         const showInferred = document.getElementById("toggle-inferred").checked;
 
+        const segmentLabel = demographic === "all"
+            ? "All participants"
+            : demographic;
+        document.getElementById("stat-segment").textContent = segmentLabel;
+
         return raw_edges.filter(e => {
+            if (demographic !== "all" && getParticipantAffiliation(e.participant_id) !== demographic) {
+                return false;
+            }
             if (round !== "all" && e.round_id !== round) return false;
             if (table !== "all" && e.table_id !== table) return false;
             if (speaker !== "all" && e.participant_id !== speaker) return false;
@@ -129,7 +154,12 @@
                 unique_speakers: speakers.size,
                 mean_confidence: confs.reduce((a, b) => a + b, 0) / confs.length,
                 has_inferred: hasInferred,
-                evidence: edges.map(e => ({ text: e.evidence_text, speaker: e.speaker, stance: e.stance })),
+                evidence: edges.map(e => ({
+                    text: e.evidence_text,
+                    speaker: e.speaker,
+                    stance: e.stance,
+                    affiliation: getParticipantAffiliation(e.participant_id),
+                })),
             };
         });
     }
@@ -303,7 +333,7 @@
         let evidenceHtml = edge.evidence.map(e => `
             <div class="modal-evidence">
                 "${e.text}"
-                <div class="ev-meta">${e.speaker} | stance: ${e.stance}</div>
+                <div class="ev-meta">${e.speaker} | ${e.affiliation || "Unknown"} | stance: ${e.stance}</div>
             </div>
         `).join("");
 
@@ -343,7 +373,7 @@
     }
 
     // Bind filter events
-    ["filter-round", "filter-table", "filter-speaker", "filter-stance"].forEach(id => {
+    ["filter-demographic", "filter-round", "filter-table", "filter-speaker", "filter-stance"].forEach(id => {
         document.getElementById(id).addEventListener("change", update);
     });
     document.getElementById("filter-confidence").addEventListener("input", (e) => {

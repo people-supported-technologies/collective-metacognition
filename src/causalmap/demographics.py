@@ -12,6 +12,40 @@ from typing import Any
 
 from .config import DEMOGRAPHICS_DIR
 
+AFFILIATION_KEYS = (
+    "U.s. political affiliation",
+    "political_affiliation",
+    "Political affiliation",
+)
+SEX_KEYS = ("Sex", "sex")
+AGE_KEYS = ("Age", "age")
+
+
+def _first_value(attrs: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        val = attrs.get(key, "").strip() if attrs.get(key) else ""
+        if val:
+            return val
+    return None
+
+
+def normalize_demographics(raw: dict[str, Any]) -> dict[str, str]:
+    """Map raw CSV columns to stable viewer field names."""
+    normalized: dict[str, str] = {}
+    affiliation = _first_value(raw, AFFILIATION_KEYS)
+    if affiliation:
+        normalized["political_affiliation"] = affiliation
+    sex = _first_value(raw, SEX_KEYS)
+    if sex:
+        normalized["sex"] = sex
+    age = _first_value(raw, AGE_KEYS)
+    if age:
+        normalized["age"] = age
+    ethnicity = raw.get("Ethnicity simplified", "").strip()
+    if ethnicity:
+        normalized["ethnicity"] = ethnicity
+    return normalized
+
 
 def load_demographics(demographics_dir: Path | None = None) -> dict[str, dict[str, Any]]:
     """Load all CSV files in the demographics directory.
@@ -44,3 +78,11 @@ def load_demographics(demographics_dir: Path | None = None) -> dict[str, dict[st
                         participants[pid][key] = val.strip()
 
     return participants
+
+
+def load_normalized_demographics(
+    demographics_dir: Path | None = None,
+) -> dict[str, dict[str, str]]:
+    """Return participant_id -> normalized demographic fields for the viewer."""
+    raw = load_demographics(demographics_dir)
+    return {pid: normalize_demographics(attrs) for pid, attrs in raw.items()}

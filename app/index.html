@@ -13,6 +13,10 @@
         
         .sidebar { background: #ffffff; padding: 16px; overflow-y: auto; border-right: 1px solid #e0e0e0; }
         .sidebar h2 { font-size: 14px; color: #6b7280; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px; }
+        .filter-group.primary { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 12px; margin-bottom: 24px; }
+        .filter-group.primary label { color: #1d4ed8; font-weight: 600; font-size: 13px; }
+        .filter-group.primary select { background: #ffffff; border-color: #93c5fd; font-weight: 500; }
+        .segment-hint { font-size: 11px; color: #6b7280; margin-top: 6px; line-height: 1.4; }
         
         .filter-group { margin-bottom: 20px; }
         .filter-group label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
@@ -112,9 +116,20 @@
         <span>Nodes: <strong id="stat-nodes">0</strong></span>
         <span>Edges: <strong id="stat-edges">0</strong></span>
         <span>Visible edges: <strong id="stat-visible">0</strong></span>
+        <span>Segment: <strong id="stat-segment">All participants</strong></span>
     </div>
     <div class="container">
         <div class="sidebar">
+            <h2>Segment</h2>
+
+            <div class="filter-group primary">
+                <label>Political affiliation</label>
+                <select id="filter-demographic">
+                    <option value="all">All participants</option>
+                </select>
+                <p class="segment-hint">Compare how the causal map changes across respondent groups. Nodes stay fixed; weights update for the selected segment.</p>
+            </div>
+
             <h2>Filters</h2>
             
             <div class="filter-group">

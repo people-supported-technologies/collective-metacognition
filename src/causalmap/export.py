@@ -10,9 +10,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from collections import Counter
+
 from .config import PROCESSED_DIR
 from .schemas import CanonicalNode, EdgeRecord
 from .aggregate import aggregate_edges
+from .demographics import load_normalized_demographics
 
 
 def export_graph_data(
@@ -39,6 +42,44 @@ def export_graph_data(
     tables = sorted(set(e.table_id for e in edges))
     rounds = sorted(set(e.round_id for e in edges))
 
+    all_demographics = load_normalized_demographics()
+    participant_ids = {e.participant_id for e in edges}
+    participant_demographics = {
+        pid: all_demographics.get(pid, {})
+        for pid in participant_ids
+    }
+
+    edge_affiliation_counts = Counter(
+        participant_demographics[e.participant_id].get("political_affiliation", "Unknown")
+        for e in edges
+    )
+    speaker_affiliation_counts = Counter(
+        participant_demographics[pid].get("political_affiliation", "Unknown")
+        for pid in participant_ids
+    )
+    demographic_filters = {
+        "political_affiliation": [
+            {
+                "value": "all",
+                "label": "All participants",
+                "edge_count": len(edges),
+                "speaker_count": len(participant_ids),
+            },
+            *[
+                {
+                    "value": value,
+                    "label": value,
+                    "edge_count": edge_affiliation_counts.get(value, 0),
+                    "speaker_count": speaker_affiliation_counts.get(value, 0),
+                }
+                for value in sorted(
+                    (v for v in edge_affiliation_counts if v != "Unknown"),
+                    key=lambda v: (-edge_affiliation_counts[v], v),
+                )
+            ],
+        ],
+    }
+
     # Build raw edges for client-side filtering
     raw_edges = []
     for edge in edges:
@@ -61,10 +102,12 @@ def export_graph_data(
         "nodes": agg["nodes"],
         "aggregated_edges": agg["edges"],
         "raw_edges": raw_edges,
+        "participant_demographics": participant_demographics,
         "metadata": {
             "speakers": speakers,
             "tables": tables,
             "rounds": rounds,
+            "demographic_filters": demographic_filters,
             "total_raw_edges": len(edges),
             "total_nodes": len(registry),
         },
