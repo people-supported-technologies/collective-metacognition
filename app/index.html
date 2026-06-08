@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attributed Conversational Causal Map</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f8f9fa; color: #1a1a2e; }
+        
+        .container { display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+        
+        .sidebar { background: #ffffff; padding: 16px; overflow-y: auto; border-right: 1px solid #e0e0e0; }
+        .sidebar h2 { font-size: 14px; color: #6b7280; text-transform: uppercase; margin-bottom: 12px; letter-spacing: 0.5px; }
+        
+        .filter-group { margin-bottom: 20px; }
+        .filter-group label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+        .filter-group select, .filter-group input { 
+            width: 100%; padding: 8px; background: #f3f4f6; border: 1px solid #d1d5db; 
+            border-radius: 4px; color: #1a1a2e; font-size: 13px; 
+        }
+        .filter-group input[type="range"] { padding: 4px 0; }
+        
+        .toggle-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+        .toggle-row input[type="checkbox"] { accent-color: #2563eb; }
+        .toggle-row label { font-size: 13px; cursor: pointer; }
+        
+        .graph-container { position: relative; overflow: hidden; background: #fafbfc; }
+        .graph-container svg { width: 100%; height: 100%; }
+        
+        .disclaimer { 
+            position: absolute; bottom: 12px; left: 12px; right: 12px;
+            background: rgba(37, 99, 235, 0.05); border: 1px solid #2563eb;
+            border-radius: 8px; padding: 10px 14px; font-size: 11px; color: #6b7280;
+        }
+        
+        .panel { background: #ffffff; padding: 16px; overflow-y: auto; border-left: 1px solid #e0e0e0; }
+        .panel h3 { font-size: 14px; margin-bottom: 12px; color: #2563eb; }
+        .panel .empty { color: #9ca3af; font-style: italic; font-size: 13px; }
+        
+        .evidence-item { 
+            background: #f3f4f6; border-radius: 6px; padding: 10px; margin-bottom: 8px; 
+            font-size: 12px; line-height: 1.5; border-left: 3px solid #2563eb;
+        }
+        .evidence-item .meta { color: #6b7280; font-size: 11px; margin-top: 4px; }
+        
+        .node-info { background: #f3f4f6; border-radius: 6px; padding: 10px; margin-bottom: 8px; }
+        .node-info .type-badge { 
+            display: inline-block; padding: 2px 8px; border-radius: 10px; 
+            font-size: 11px; background: #e5e7eb; margin-right: 4px; 
+        }
+        
+        .stats-bar { 
+            display: flex; gap: 16px; padding: 8px 16px; background: #ffffff; 
+            border-bottom: 1px solid #e0e0e0; font-size: 12px; color: #6b7280; 
+        }
+        .stats-bar span strong { color: #1a1a2e; }
+
+        .edge-line { stroke-linecap: round; }
+        .edge-label { font-size: 9px; fill: #6b7280; pointer-events: none; }
+        .node-label { font-size: 11px; fill: #1a1a2e; pointer-events: none; text-anchor: middle; }
+        .arrow-marker { fill: #6b7280; }
+
+        .tooltip {
+            position: absolute; pointer-events: none; z-index: 1000;
+            background: #ffffff; border: 1px solid #d1d5db; border-radius: 6px;
+            padding: 8px 12px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 260px; line-height: 1.4;
+        }
+        .tooltip .tt-label { font-weight: 600; margin-bottom: 2px; }
+        .tooltip .tt-type { font-size: 11px; color: #6b7280; }
+        .tooltip .tt-rel { color: #2563eb; font-weight: 500; }
+
+        .modal-overlay {
+            position: fixed; inset: 0; z-index: 2000;
+            background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none; transition: opacity 0.2s;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
+        .modal {
+            background: #ffffff; border-radius: 12px; padding: 24px; width: 520px; max-width: 90vw;
+            max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        }
+        .modal h2 { font-size: 18px; margin-bottom: 4px; }
+        .modal .modal-subtitle { font-size: 13px; color: #6b7280; margin-bottom: 16px; }
+        .modal .modal-section { margin-bottom: 16px; }
+        .modal .modal-section h4 { font-size: 12px; text-transform: uppercase; color: #6b7280; margin-bottom: 8px; letter-spacing: 0.3px; }
+        .modal .modal-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px; font-weight: 500; margin-right: 6px; margin-bottom: 4px; }
+        .modal .badge-type { background: #dbeafe; color: #1d4ed8; }
+        .modal .badge-stance { background: #dcfce7; color: #166534; }
+        .modal .badge-expl { background: #fef3c7; color: #92400e; }
+        .modal .badge-conf { background: #f3e8ff; color: #6b21a8; }
+        .modal .modal-evidence {
+            background: #f8fafc; border-left: 3px solid #2563eb; border-radius: 4px;
+            padding: 10px 14px; margin-bottom: 8px; font-size: 13px; line-height: 1.6;
+        }
+        .modal .modal-evidence .ev-meta { font-size: 11px; color: #6b7280; margin-top: 4px; }
+        .modal .modal-close {
+            position: absolute; top: 16px; right: 16px; background: none; border: none;
+            font-size: 20px; cursor: pointer; color: #6b7280; line-height: 1;
+        }
+        .modal .modal-close:hover { color: #1a1a2e; }
+        .modal .modal-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+        .modal .stat-card { background: #f3f4f6; border-radius: 6px; padding: 10px; text-align: center; }
+        .modal .stat-card .stat-val { font-size: 20px; font-weight: 700; color: #2563eb; }
+        .modal .stat-card .stat-lbl { font-size: 11px; color: #6b7280; }
+    </style>
+</head>
+<body>
+    <div class="stats-bar" id="stats-bar">
+        <span>Nodes: <strong id="stat-nodes">0</strong></span>
+        <span>Edges: <strong id="stat-edges">0</strong></span>
+        <span>Visible edges: <strong id="stat-visible">0</strong></span>
+    </div>
+    <div class="container">
+        <div class="sidebar">
+            <h2>Filters</h2>
+            
+            <div class="filter-group">
+                <label>Round</label>
+                <select id="filter-round"><option value="all">All rounds</option></select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Table</label>
+                <select id="filter-table"><option value="all">All tables</option></select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Speaker</label>
+                <select id="filter-speaker"><option value="all">All speakers</option></select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Min. confidence: <span id="conf-val">0.0</span></label>
+                <input type="range" id="filter-confidence" min="0" max="1" step="0.05" value="0">
+            </div>
+            
+            <div class="filter-group">
+                <label>Stance</label>
+                <select id="filter-stance">
+                    <option value="all">All stances</option>
+                    <option value="asserted">Asserted</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="questioned">Questioned</option>
+                    <option value="reported">Reported</option>
+                    <option value="uncertain">Uncertain</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Display options</label>
+                <div class="toggle-row">
+                    <input type="checkbox" id="toggle-inferred" checked>
+                    <label for="toggle-inferred">Show inferred edges</label>
+                </div>
+                <div class="toggle-row">
+                    <input type="checkbox" id="toggle-labels" checked>
+                    <label for="toggle-labels">Show edge labels</label>
+                </div>
+                <div class="toggle-row">
+                    <input type="checkbox" id="toggle-isolated">
+                    <label for="toggle-isolated">Hide isolated nodes</label>
+                </div>
+            </div>
+        </div>
+        
+        <div class="graph-container" id="graph-container">
+            <div class="disclaimer">
+                This graph represents relationships expressed or discussed by participants. It does not establish causal truth.
+            </div>
+        </div>
+    </div>
+    <div class="tooltip" id="tooltip" style="display:none;"></div>
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="modal" style="position:relative;"></div>
+    </div>
+    <script src="main.js"></script>
+</body>
+</html>
