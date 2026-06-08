@@ -1,6 +1,30 @@
 // D3 force-directed viewer for attributed causal maps
 // Loads graph_data.json, renders fixed node universe, filters resize nodes/edges
 
+const NODE_TYPE_LABELS = {
+    actor: "Actor",
+    technology: "Technology",
+    policy: "Policy",
+    event: "Event",
+    process: "Process",
+    outcome: "Outcome",
+    value: "Value",
+    belief_proposition: "Belief proposition",
+    topic: "Topic",
+};
+
+const NODE_TYPE_COLORS = {
+    actor: "#f97316",
+    technology: "#06b6d4",
+    policy: "#8b5cf6",
+    event: "#ef4444",
+    process: "#22c55e",
+    outcome: "#eab308",
+    value: "#ec4899",
+    belief_proposition: "#14b8a6",
+    topic: "#6366f1",
+};
+
 (async function() {
     const data = await d3.json("graph_data.json");
     if (!data) { console.error("Failed to load graph_data.json"); return; }
@@ -23,6 +47,29 @@
     populateSelect("filter-round", metadata.rounds.map(r => ({ value: r, label: `Round ${r}` })));
     populateSelect("filter-table", metadata.tables.map(t => ({ value: t, label: t.slice(0, 8) })));
     populateSelect("filter-speaker", metadata.speakers.map(s => ({ value: s, label: s.slice(0, 12) })));
+
+    const typeCounts = new Map();
+    for (const n of nodes) {
+        typeCounts.set(n.type, (typeCounts.get(n.type) || 0) + 1);
+    }
+    const entityTypeOptions = [
+        { value: "all", label: "All types", count: nodes.length },
+        ...[...typeCounts.entries()]
+            .sort((a, b) => b[1] - a[1])
+            .map(([type, count]) => ({
+                value: type,
+                label: NODE_TYPE_LABELS[type] || type,
+                count,
+            })),
+    ];
+    populateSelect(
+        "filter-entity-type",
+        entityTypeOptions.map(opt => ({
+            value: opt.value,
+            label: opt.count != null ? `${opt.label} (${opt.count})` : opt.label,
+        })),
+    );
+    buildTypeLegend(typeCounts);
 
     // Stats
     document.getElementById("stat-nodes").textContent = nodes.length;
@@ -108,8 +155,13 @@
         return participant_demographics[participantId]?.political_affiliation || "Unknown";
     }
 
+    function getNodeType(nodeId) {
+        return nodeMap.get(nodeId)?.type;
+    }
+
     function getFilteredEdges() {
         const demographic = document.getElementById("filter-demographic").value;
+        const entityType = document.getElementById("filter-entity-type").value;
         const round = document.getElementById("filter-round").value;
         const table = document.getElementById("filter-table").value;
         const speaker = document.getElementById("filter-speaker").value;
@@ -125,6 +177,13 @@
         return raw_edges.filter(e => {
             if (demographic !== "all" && getParticipantAffiliation(e.participant_id) !== demographic) {
                 return false;
+            }
+            if (entityType !== "all") {
+                const srcType = getNodeType(e.source_node_id);
+                const tgtType = getNodeType(e.target_node_id);
+                if (srcType !== entityType && tgtType !== entityType) {
+                    return false;
+                }
             }
             if (round !== "all" && e.round_id !== round) return false;
             if (table !== "all" && e.table_id !== table) return false;
@@ -281,12 +340,19 @@
     function dragended(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
 
     function nodeColor(type) {
-        const colors = {
-            actor: "#f97316", technology: "#06b6d4", policy: "#8b5cf6",
-            event: "#ef4444", process: "#22c55e", outcome: "#eab308",
-            value: "#ec4899", belief_proposition: "#14b8a6", topic: "#6366f1",
-        };
-        return colors[type] || "#8899a6";
+        return NODE_TYPE_COLORS[type] || "#8899a6";
+    }
+
+    function buildTypeLegend(typeCounts) {
+        const legend = document.getElementById("type-legend");
+        const sorted = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
+        legend.innerHTML = sorted.map(([type, count]) => `
+            <div class="legend-item">
+                <span class="legend-swatch" style="background:${nodeColor(type)}"></span>
+                <span>${NODE_TYPE_LABELS[type] || type}</span>
+                <span class="legend-count">${count}</span>
+            </div>
+        `).join("");
     }
 
     function openNodeModal(node, weight, filteredEdges, aggEdges) {
@@ -373,7 +439,7 @@
     }
 
     // Bind filter events
-    ["filter-demographic", "filter-round", "filter-table", "filter-speaker", "filter-stance"].forEach(id => {
+    ["filter-demographic", "filter-entity-type", "filter-round", "filter-table", "filter-speaker", "filter-stance"].forEach(id => {
         document.getElementById(id).addEventListener("change", update);
     });
     document.getElementById("filter-confidence").addEventListener("input", (e) => {

@@ -17,6 +17,10 @@
         .filter-group.primary label { color: #1d4ed8; font-weight: 600; font-size: 13px; }
         .filter-group.primary select { background: #ffffff; border-color: #93c5fd; font-weight: 500; }
         .segment-hint { font-size: 11px; color: #6b7280; margin-top: 6px; line-height: 1.4; }
+        .legend { margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; color: #374151; }
+        .legend-swatch { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.08); }
+        .legend-count { color: #9ca3af; font-size: 11px; margin-left: auto; }
         
         .filter-group { margin-bottom: 20px; }
         .filter-group label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
@@ -146,6 +150,12 @@
                 <label>Speaker</label>
                 <select id="filter-speaker"><option value="all">All speakers</option></select>
             </div>
+
+            <div class="filter-group">
+                <label>Entity type</label>
+                <select id="filter-entity-type"><option value="all">All types</option></select>
+                <p class="segment-hint">Show relationships involving entities of the selected type (as source or target).</p>
+            </div>
             
             <div class="filter-group">
                 <label>Min. confidence: <span id="conf-val">0.0</span></label>
@@ -164,6 +174,9 @@
                 </select>
             </div>
             
+            <h2>Node colours</h2>
+            <div class="filter-group legend" id="type-legend"></div>
+
             <div class="filter-group">
                 <label>Display options</label>
                 <div class="toggle-row">
