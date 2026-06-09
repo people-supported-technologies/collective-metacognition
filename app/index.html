@@ -120,7 +120,9 @@
         <span>Nodes: <strong id="stat-nodes">0</strong></span>
         <span>Edges: <strong id="stat-edges">0</strong></span>
         <span>Visible edges: <strong id="stat-visible">0</strong></span>
+        <span>Stances: <strong id="stat-stances">0</strong></span>
         <span>Segment: <strong id="stat-segment">All participants</strong></span>
+        <span id="stat-compare-wrap" style="display:none;">Diverging concepts: <strong id="stat-diverge">0</strong></span>
     </div>
     <div class="container">
         <div class="sidebar">
@@ -132,6 +134,14 @@
                     <option value="all">All participants</option>
                 </select>
                 <p class="segment-hint">Compare how the causal map changes across respondent groups. Nodes stay fixed; weights update for the selected segment.</p>
+            </div>
+
+            <div class="filter-group primary">
+                <label>Compare against</label>
+                <select id="filter-compare">
+                    <option value="none">No comparison</option>
+                </select>
+                <p class="segment-hint">When set, edges are coloured by which group asserts them and nodes by how much the two groups' positions diverge.</p>
             </div>
 
             <h2>Filters</h2>
@@ -174,8 +184,27 @@
                 </select>
             </div>
             
-            <h2>Node colours</h2>
+            <div class="filter-group">
+                <label>Colour nodes by</label>
+                <select id="color-mode">
+                    <option value="type">Entity type</option>
+                    <option value="polarity">Stance polarity (supports / opposes)</option>
+                </select>
+            </div>
+
+            <h2 id="legend-title">Node colours</h2>
             <div class="filter-group legend" id="type-legend"></div>
+            <div class="filter-group legend" id="polarity-legend" style="display:none;">
+                <div class="legend-item"><span class="legend-swatch" style="background:#16a34a"></span><span>Supports (+)</span></div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#9ca3af"></span><span>Neutral / mixed</span></div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#dc2626"></span><span>Opposes (-)</span></div>
+            </div>
+            <div class="filter-group legend" id="compare-legend" style="display:none;">
+                <div class="legend-item"><span class="legend-swatch" style="background:#2563eb"></span><span id="legend-only-a">Only group A</span></div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#dc2626"></span><span id="legend-only-b">Only group B</span></div>
+                <div class="legend-item"><span class="legend-swatch" style="background:#9ca3af"></span><span>Both groups</span></div>
+                <div class="legend-item" style="margin-top:6px;">Node ring = position divergence</div>
+            </div>
 
             <div class="filter-group">
                 <label>Display options</label>

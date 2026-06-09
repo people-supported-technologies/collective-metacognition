@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import LABELLED_DIR, PROCESSED_DIR
-from .schemas import EdgeRecord
+from .schemas import EdgeRecord, StanceRecord
 
 
 def generate_labeling_template(
@@ -52,18 +52,26 @@ def generate_labeling_template(
 def compute_metrics(
     predicted_edges: list[EdgeRecord],
     gold_path: Path | None = None,
+    stances: list[StanceRecord] | None = None,
 ) -> dict[str, Any]:
-    """Compute extraction quality metrics against a gold-standard file.
+    """Compute extraction quality + normalization metrics.
 
-    If no gold file exists, returns summary stats of predicted edges only.
+    Adds polarity, stance-overlay, grounding-coverage, and Dem-vs-Rep group
+    overlap/divergence so we can measure whether the redesign actually made the
+    two groups comparable.
     """
+    stances = stances or []
     stats: dict[str, Any] = {
         "total_predicted_edges": len(predicted_edges),
+        "total_stances": len(stances),
         "relation_distribution": {},
         "stance_distribution": {},
         "explicitness_distribution": {},
+        "polarity_distribution": {},
         "confidence_stats": {},
         "causal_vs_value_share": {},
+        "grounding_coverage": {},
+        "group_overlap": {},
     }
 
     if not predicted_edges:
@@ -75,11 +83,13 @@ def compute_metrics(
     rel_dist = Counter(e.relation.value for e in predicted_edges)
     stance_dist = Counter(e.stance.value for e in predicted_edges)
     expl_dist = Counter(e.explicitness.value for e in predicted_edges)
+    pol_dist = Counter(e.polarity.value for e in predicted_edges)
     confidences = [e.confidence for e in predicted_edges]
 
     stats["relation_distribution"] = dict(rel_dist.most_common())
     stats["stance_distribution"] = dict(stance_dist.most_common())
     stats["explicitness_distribution"] = dict(expl_dist.most_common())
+    stats["polarity_distribution"] = dict(pol_dist.most_common())
     stats["confidence_stats"] = {
         "mean": statistics.mean(confidences),
         "median": statistics.median(confidences),
@@ -87,7 +97,6 @@ def compute_metrics(
         "max": max(confidences),
     }
 
-    # Causal relations vs value/stance relations
     causal_rels = {"causes", "increases", "reduces", "enables", "prevents", "reinforces", "undermines", "increases_exposure_to"}
     value_rels = {"expresses", "rejects", "questions", "reports", "supports", "opposes"}
 
@@ -103,11 +112,60 @@ def compute_metrics(
         "value_fraction": value_count / len(predicted_edges),
     }
 
-    # If gold file exists, compute precision/recall
+    # Grounding coverage: fraction of endpoints/stances resolved to a concept_id.
+    grounded_endpoints = sum(
+        (1 if e.source_node_id else 0) + (1 if e.target_node_id else 0)
+        for e in predicted_edges
+    )
+    total_endpoints = 2 * len(predicted_edges)
+    grounded_stances = sum(1 for s in stances if s.concept_node_id)
+    concept_ids = set()
+    for e in predicted_edges:
+        concept_ids.update(filter(None, [e.source_node_id, e.target_node_id]))
+    for s in stances:
+        if s.concept_node_id:
+            concept_ids.add(s.concept_node_id)
+    stats["grounding_coverage"] = {
+        "edge_endpoints_grounded_fraction": grounded_endpoints / total_endpoints if total_endpoints else 0,
+        "stances_grounded_fraction": grounded_stances / len(stances) if stances else 0,
+        "unique_grounded_concepts": len(concept_ids),
+    }
+
+    stats["group_overlap"] = _group_overlap(predicted_edges, stances)
+
     if gold_path and gold_path.exists():
         stats["gold_comparison"] = _compare_to_gold(predicted_edges, gold_path)
 
     return stats
+
+
+def _group_overlap(
+    edges: list[EdgeRecord],
+    stances: list[StanceRecord],
+    attribute: str = "political_affiliation",
+) -> dict[str, Any]:
+    """Dem-vs-Rep shared-triple Jaccard + top polarity divergences (the headline metric)."""
+    try:
+        from .aggregate import compute_group_divergence
+        from .demographics import load_normalized_demographics
+    except Exception:  # noqa: BLE001
+        return {}
+
+    demographics = load_normalized_demographics()
+    if not demographics:
+        return {}
+
+    div = compute_group_divergence(edges, stances, demographics, attribute=attribute)
+    return {
+        "attribute": div.get("attribute"),
+        "group_a": div.get("group_a"),
+        "group_b": div.get("group_b"),
+        "shared_triples": div.get("shared_triples"),
+        "only_a_triples": div.get("only_a_triples"),
+        "only_b_triples": div.get("only_b_triples"),
+        "triple_jaccard": div.get("triple_jaccard"),
+        "top_divergent_concepts": div.get("concept_divergence", [])[:10],
+    }
 
 
 def _compare_to_gold(predicted: list[EdgeRecord], gold_path: Path) -> dict[str, Any]:
