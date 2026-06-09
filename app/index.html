@@ -207,6 +207,11 @@
             </div>
 
             <div class="filter-group">
+                <label>Node spacing: <span id="repulsion-val">50</span></label>
+                <input type="range" id="filter-repulsion" min="10" max="300" step="5" value="50">
+            </div>
+
+            <div class="filter-group">
                 <label>Display options</label>
                 <div class="toggle-row">
                     <input type="checkbox" id="toggle-inferred" checked>
@@ -220,6 +225,11 @@
                     <input type="checkbox" id="toggle-isolated">
                     <label for="toggle-isolated">Hide isolated nodes</label>
                 </div>
+                <div class="toggle-row">
+                    <input type="checkbox" id="toggle-central">
+                    <label for="toggle-central">Highlight most central nodes</label>
+                </div>
+                <p class="segment-hint" id="central-hint" style="display:none;">Degree centrality within the selected segment. In compare mode, highlights nodes that are far more central for one group than the other (differential centrality).</p>
             </div>
         </div>
         

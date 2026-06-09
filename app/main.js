@@ -104,6 +104,17 @@ function polarityColor(mean) {
         .force("x", d3.forceX(width / 2).strength(0.05))
         .force("y", d3.forceY(height / 2).strength(0.05));
 
+    // After the initial layout converges, freeze all node positions so that
+    // switching demographic filters only changes visual encoding (color, size,
+    // link presence) without moving nodes — essential for comparing conditions.
+    let layoutFrozen = false;
+    simulation.on("end", () => {
+        if (!layoutFrozen) {
+            layoutFrozen = true;
+            for (const n of nodeArray) { n.fx = n.x; n.fy = n.y; }
+        }
+    });
+
     const linkGroup = g.append("g").attr("class", "links");
     const labelGroup = g.append("g").attr("class", "edge-labels");
     const nodeGroup = g.append("g").attr("class", "nodes");
@@ -193,6 +204,27 @@ function polarityColor(mean) {
         return out;
     }
 
+    // Degree centrality = number of distinct neighbouring concepts, from a set of
+    // aggregated links (source/target may be ids or node objects).
+    function degreeFromLinks(linkList) {
+        const neighbors = new Map();
+        const add = (a, b) => {
+            if (!neighbors.has(a)) neighbors.set(a, new Set());
+            neighbors.get(a).add(b);
+        };
+        for (const l of linkList) {
+            const s = l.source.node_id || l.source;
+            const t = l.target.node_id || l.target;
+            if (!s || !t) continue;
+            add(s, t); add(t, s);
+        }
+        const deg = new Map();
+        for (const [id, set] of neighbors) deg.set(id, set.size);
+        return deg;
+    }
+
+    const TOP_CENTRAL = 15;
+
     function aggregateEdges(filtered) {
         const groups = new Map();
         for (const e of filtered) {
@@ -227,7 +259,9 @@ function polarityColor(mean) {
         const colorMode = document.getElementById("color-mode").value;
         const hideIsolated = document.getElementById("toggle-isolated").checked;
         const showLabels = document.getElementById("toggle-labels").checked;
+        const highlightCentral = document.getElementById("toggle-central").checked;
         const comparing = compareGroup !== "none";
+        document.getElementById("central-hint").style.display = highlightCentral ? "" : "none";
 
         document.getElementById("stat-segment").textContent =
             demographic === "all" ? "All participants" : demographic;
@@ -244,6 +278,7 @@ function polarityColor(mean) {
         }
 
         let links, nodeWeights, nodePol, divergence, edgePresence;
+        let degreeA = null, degreeB = null;
 
         if (!comparing) {
             const filtered = getEdges(demographic);
@@ -267,6 +302,8 @@ function polarityColor(mean) {
             const stancesA = getStances(groupA), stancesB = getStances(compareGroup);
 
             const aggA = aggregateEdges(edgesA), aggB = aggregateEdges(edgesB);
+            degreeA = degreeFromLinks(aggA);
+            degreeB = degreeFromLinks(aggB);
             const keyOf = e => `${e.source}|${e.target}|${e.relation}`;
             const mapA = new Map(aggA.map(e => [keyOf(e), e]));
             const mapB = new Map(aggB.map(e => [keyOf(e), e]));
@@ -310,6 +347,30 @@ function polarityColor(mean) {
             document.getElementById("stat-diverge").textContent = divCount;
         }
 
+        // Centrality: per-segment degree, or differential degree in compare mode.
+        const centralityScore = new Map();
+        if (comparing) {
+            const maxA = Math.max(1, ...degreeA.values());
+            const maxB = Math.max(1, ...degreeB.values());
+            const ids = new Set([...degreeA.keys(), ...degreeB.keys()]);
+            for (const id of ids) {
+                const normA = (degreeA.get(id) || 0) / maxA;
+                const normB = (degreeB.get(id) || 0) / maxB;
+                centralityScore.set(id, Math.abs(normA - normB));
+            }
+        } else {
+            for (const [id, deg] of degreeFromLinks(links)) centralityScore.set(id, deg);
+        }
+        const topCentral = new Set();
+        if (highlightCentral) {
+            const ranked = [...centralityScore.entries()]
+                .filter(([id, s]) => s > 0 && (nodeWeights.get(id) || 0) > 0)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, TOP_CENTRAL)
+                .map(([id]) => id);
+            ranked.forEach(id => topCentral.add(id));
+        }
+
         simulation.force("link").links(links);
 
         // Links
@@ -345,20 +406,27 @@ function polarityColor(mean) {
                 const w = nodeWeights.get(d.node_id) || 0;
                 const pol = nodePol.get(d.node_id);
                 const div = divergence ? divergence.get(d.node_id) : null;
+                const cen = centralityScore.get(d.node_id);
                 showTooltip(event, `
                     <div class="tt-label">${d.label}</div>
                     <div class="tt-type">${d.type} | weight: ${w} | polarity: ${fmtPol(pol)}</div>
-                    ${div != null ? `<div class="tt-type">divergence: ${div.toFixed(2)}</div>` : ""}`);
+                    ${div != null ? `<div class="tt-type">divergence: ${div.toFixed(2)}</div>` : ""}
+                    ${cen != null ? `<div class="tt-type">${comparing ? "diff. centrality" : "centrality"}: ${cen.toFixed(2)}</div>` : ""}`);
             })
             .on("mousemove", moveTooltip).on("mouseleave", hideTooltip)
             .on("click", (event, d) => { hideTooltip(); openNodeModal(d, nodeWeights.get(d.node_id), nodePol.get(d.node_id), links); });
         nodeEnter.merge(nodeSel)
-            .attr("r", d => { const w = nodeWeights.get(d.node_id) || 0; return w === 0 ? 4 : 6 + (w / maxWeight) * 20; })
+            .attr("r", d => {
+                const w = nodeWeights.get(d.node_id) || 0;
+                const base = w === 0 ? 4 : 6 + (w / maxWeight) * 20;
+                return topCentral.has(d.node_id) ? base + 6 : base;
+            })
             .attr("fill", d => {
                 if (comparing) return polarityColor(nodePol.get(d.node_id));
                 return colorMode === "polarity" ? polarityColor(nodePol.get(d.node_id)) : nodeColor(d.type);
             })
             .attr("stroke", d => {
+                if (topCentral.has(d.node_id)) return "#f59e0b";
                 if (comparing) {
                     const div = divergence.get(d.node_id) || 0;
                     return div >= 0.5 ? "#7c3aed" : "#ffffff";
@@ -366,30 +434,50 @@ function polarityColor(mean) {
                 return "#ffffff";
             })
             .attr("stroke-width", d => {
+                if (topCentral.has(d.node_id)) return 4;
                 if (comparing) { const div = divergence.get(d.node_id) || 0; return div >= 0.5 ? 3 : 1.5; }
                 return 1.5;
             })
-            .attr("opacity", d => nodeWeights.get(d.node_id) > 0 ? 1 : 0.25);
+            .attr("opacity", d => {
+                const w = nodeWeights.get(d.node_id) || 0;
+                if (highlightCentral) return topCentral.has(d.node_id) ? 1 : (w > 0 ? 0.15 : 0.05);
+                return w > 0 ? 1 : 0.25;
+            });
 
-        const textSel = textGroup.selectAll("text").data(nodeData.filter(d => nodeWeights.get(d.node_id) > 0), d => d.node_id);
+        const labelData = highlightCentral
+            ? nodeData.filter(d => topCentral.has(d.node_id))
+            : nodeData.filter(d => nodeWeights.get(d.node_id) > 0);
+        const textSel = textGroup.selectAll("text").data(labelData, d => d.node_id);
         textSel.exit().remove();
         textSel.enter().append("text").attr("class", "node-label").attr("dy", -14)
             .merge(textSel).text(d => d.label.length > 22 ? d.label.slice(0, 20) + "..." : d.label);
 
         simulation.nodes(nodeData);
-        simulation.alpha(0.3).restart();
+        if (!layoutFrozen) {
+            simulation.alpha(0.3).restart();
+        } else {
+            // Positions frozen: just redraw at current coords without physics.
+            simulation.alpha(0).restart();
+            tickPositions();
+        }
     }
 
-    simulation.on("tick", () => {
+    function tickPositions() {
         linkGroup.selectAll("line").attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
         labelGroup.selectAll("text").attr("x", d => (d.source.x + d.target.x) / 2).attr("y", d => (d.source.y + d.target.y) / 2);
         nodeGroup.selectAll("circle").attr("cx", d => d.x).attr("cy", d => d.y);
         textGroup.selectAll("text").attr("x", d => d.x).attr("y", d => d.y);
-    });
+    }
+
+    simulation.on("tick", tickPositions);
 
     function dragstarted(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
     function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
-    function dragended(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+    function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        if (layoutFrozen) { d.fx = event.x; d.fy = event.y; }
+        else { d.fx = null; d.fy = null; }
+    }
 
     function nodeColor(type) { return NODE_TYPE_COLORS[type] || "#8899a6"; }
     function presenceColor(p) { return p === "a" ? GROUP_A_COLOR : p === "b" ? GROUP_B_COLOR : BOTH_COLOR; }
@@ -482,7 +570,15 @@ function polarityColor(mean) {
     document.getElementById("filter-confidence").addEventListener("input", (e) => {
         document.getElementById("conf-val").textContent = e.target.value; update();
     });
-    ["toggle-inferred", "toggle-labels", "toggle-isolated"].forEach(id => {
+    document.getElementById("filter-repulsion").addEventListener("input", (e) => {
+        const val = parseFloat(e.target.value);
+        document.getElementById("repulsion-val").textContent = val;
+        simulation.force("charge", d3.forceManyBody().strength(-val));
+        layoutFrozen = false;
+        for (const n of nodeArray) { n.fx = null; n.fy = null; }
+        simulation.alpha(0.5).restart();
+    });
+    ["toggle-inferred", "toggle-labels", "toggle-isolated", "toggle-central"].forEach(id => {
         document.getElementById(id).addEventListener("change", update);
     });
 
