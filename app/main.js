@@ -48,17 +48,103 @@ function polarityColor(mean) {
         participant_demographics = {},
     } = data;
 
-    const affiliationOptions = metadata.demographic_filters?.political_affiliation || [
-        { value: "all", label: "All participants", edge_count: metadata.speakers?.length || 0 },
+    // ---- Multi-dimension demographic segments (intersection filter) ----
+    const JUNK_VALUES = new Set(["CONSENT_REVOKED", "DATA_EXPIRED", "", "Unknown", "nan"]);
+
+    function ageGroup(age) {
+        const n = parseInt(age, 10);
+        if (isNaN(n)) return undefined;
+        if (n < 30) return "18-29";
+        if (n < 45) return "30-44";
+        if (n < 60) return "45-59";
+        return "60+";
+    }
+
+    // Build an augmented per-participant demographic record with derived age_group
+    // and junk values stripped.
+    const pdemo = {};
+    for (const [pid, raw] of Object.entries(participant_demographics)) {
+        const rec = {};
+        for (const key of ["political_affiliation", "sex", "ethnicity"]) {
+            const v = raw[key];
+            if (v && !JUNK_VALUES.has(v)) rec[key] = v;
+        }
+        const ag = ageGroup(raw.age);
+        if (ag) rec.age_group = ag;
+        pdemo[pid] = rec;
+    }
+
+    const DIM_CONFIG = [
+        { key: "political_affiliation", label: "Political affiliation" },
+        { key: "age_group", label: "Age group", order: ["18-29", "30-44", "45-59", "60+"] },
+        { key: "sex", label: "Sex" },
+        { key: "ethnicity", label: "Ethnicity" },
     ];
-    populateSelect("filter-demographic", affiliationOptions.map(opt => ({
-        value: opt.value,
-        label: opt.edge_count != null ? `${opt.label} (${opt.edge_count} edges)` : opt.label,
-    })));
-    // Compare dropdown: concrete groups only (no "all").
-    populateSelect("filter-compare", affiliationOptions
-        .filter(opt => opt.value !== "all")
-        .map(opt => ({ value: opt.value, label: `vs ${opt.label}` })));
+
+    // Distinct values per dimension (with participant counts) over participants who speak.
+    const speakerSet = new Set(metadata.speakers || []);
+    const DIMS = DIM_CONFIG.map(cfg => {
+        const counts = new Map();
+        for (const pid of speakerSet) {
+            const v = pdemo[pid]?.[cfg.key];
+            if (v) counts.set(v, (counts.get(v) || 0) + 1);
+        }
+        let values = [...counts.entries()];
+        if (cfg.order) {
+            values.sort((a, b) => cfg.order.indexOf(a[0]) - cfg.order.indexOf(b[0]));
+        } else {
+            values.sort((a, b) => b[1] - a[1]);
+        }
+        return { key: cfg.key, label: cfg.label, values };
+    }).filter(d => d.values.length > 0);
+
+    function buildDimensionSelects(containerId, prefix) {
+        const container = document.getElementById(containerId);
+        container.innerHTML = "";
+        for (const dim of DIMS) {
+            const label = document.createElement("label");
+            label.textContent = dim.label;
+            const sel = document.createElement("select");
+            sel.id = `${prefix}-${dim.key}`;
+            sel.dataset.dimKey = dim.key;
+            sel.dataset.segment = prefix;
+            const anyOpt = document.createElement("option");
+            anyOpt.value = "any"; anyOpt.textContent = "Any";
+            sel.appendChild(anyOpt);
+            for (const [val, count] of dim.values) {
+                const opt = document.createElement("option");
+                opt.value = val; opt.textContent = `${val} (${count})`;
+                sel.appendChild(opt);
+            }
+            sel.addEventListener("change", update);
+            container.appendChild(label);
+            container.appendChild(sel);
+        }
+    }
+    buildDimensionSelects("segment-a-dims", "dimA");
+    buildDimensionSelects("segment-b-dims", "dimB");
+
+    function readSegment(prefix) {
+        const sel = {};
+        for (const dim of DIMS) {
+            const el = document.getElementById(`${prefix}-${dim.key}`);
+            if (el && el.value !== "any") sel[dim.key] = el.value;
+        }
+        return sel;
+    }
+
+    function matchesSegment(pid, segment) {
+        const rec = pdemo[pid];
+        for (const [key, val] of Object.entries(segment)) {
+            if (!rec || rec[key] !== val) return false;
+        }
+        return true;
+    }
+
+    function describeSegment(segment) {
+        const parts = DIMS.map(d => segment[d.key]).filter(Boolean);
+        return parts.length ? parts.join(", ") : "All participants";
+    }
 
     populateSelect("filter-round", metadata.rounds.map(r => ({ value: r, label: `Round ${r}` })));
     populateSelect("filter-table", metadata.tables.map(t => ({ value: t, label: t.slice(0, 8) })));
@@ -95,6 +181,7 @@ function polarityColor(mean) {
 
     const nodeMap = new Map(nodes.map(n => [n.node_id, { ...n, x: width / 2, y: height / 2 }]));
     const nodeArray = Array.from(nodeMap.values());
+    let curDescA = "A", curDescB = "B";  // current segment descriptions (for labels)
 
     const simulation = d3.forceSimulation(nodeArray)
         .force("link", d3.forceLink().id(d => d.node_id).distance(80))
@@ -178,15 +265,11 @@ function polarityColor(mean) {
         return true;
     }
 
-    function inGroup(pid, group) {
-        return group === "all" ? true : affiliationOf(pid) === group;
+    function getEdges(segment) {
+        return raw_edges.filter(e => passesCommon(e) && matchesSegment(e.participant_id, segment));
     }
-
-    function getEdges(group) {
-        return raw_edges.filter(e => passesCommon(e) && inGroup(e.participant_id, group));
-    }
-    function getStances(group) {
-        return raw_stances.filter(s => stancePassesCommon(s) && inGroup(s.participant_id, group));
+    function getStances(segment) {
+        return raw_stances.filter(s => stancePassesCommon(s) && matchesSegment(s.participant_id, segment));
     }
 
     // Per-node mean polarity from edges (both endpoints) + stances.
@@ -254,17 +337,20 @@ function polarityColor(mean) {
     }
 
     function update() {
-        const demographic = document.getElementById("filter-demographic").value;
-        const compareGroup = document.getElementById("filter-compare").value;
+        const segmentA = readSegment("dimA");
+        const segmentB = readSegment("dimB");
         const colorMode = document.getElementById("color-mode").value;
         const hideIsolated = document.getElementById("toggle-isolated").checked;
         const showLabels = document.getElementById("toggle-labels").checked;
         const highlightCentral = document.getElementById("toggle-central").checked;
-        const comparing = compareGroup !== "none";
+        const comparing = document.getElementById("toggle-compare").checked;
         document.getElementById("central-hint").style.display = highlightCentral ? "" : "none";
+        document.getElementById("segment-b-wrap").style.display = comparing ? "" : "none";
 
-        document.getElementById("stat-segment").textContent =
-            demographic === "all" ? "All participants" : demographic;
+        const descA = describeSegment(segmentA);
+        const descB = describeSegment(segmentB);
+        curDescA = descA; curDescB = descB;
+        document.getElementById("stat-segment").textContent = descA;
 
         // Toggle legends
         document.getElementById("type-legend").style.display = (colorMode === "type" && !comparing) ? "" : "none";
@@ -273,16 +359,16 @@ function polarityColor(mean) {
         document.getElementById("legend-title").textContent = comparing ? "Comparison" : "Node colours";
         document.getElementById("stat-compare-wrap").style.display = comparing ? "" : "none";
         if (comparing) {
-            document.getElementById("legend-only-a").textContent = `Only ${demographic === "all" ? "group A" : demographic}`;
-            document.getElementById("legend-only-b").textContent = `Only ${compareGroup}`;
+            document.getElementById("legend-only-a").textContent = `Only A (${descA})`;
+            document.getElementById("legend-only-b").textContent = `Only B (${descB})`;
         }
 
         let links, nodeWeights, nodePol, divergence, edgePresence;
         let degreeA = null, degreeB = null;
 
         if (!comparing) {
-            const filtered = getEdges(demographic);
-            const filteredStances = getStances(demographic);
+            const filtered = getEdges(segmentA);
+            const filteredStances = getStances(segmentA);
             const agg = aggregateEdges(filtered);
             document.getElementById("stat-visible").textContent = filtered.length;
 
@@ -296,10 +382,9 @@ function polarityColor(mean) {
             nodePol = nodePolarity(filtered, filteredStances);
             links = agg.map(e => ({ ...e, source: e.source, target: e.target, presence: "both" }));
         } else {
-            // Comparison: union of A and B edges, tagged by group presence.
-            const groupA = demographic; // may be "all"
-            const edgesA = getEdges(groupA), edgesB = getEdges(compareGroup);
-            const stancesA = getStances(groupA), stancesB = getStances(compareGroup);
+            // Comparison: union of A and B edges, tagged by segment presence.
+            const edgesA = getEdges(segmentA), edgesB = getEdges(segmentB);
+            const stancesA = getStances(segmentA), stancesB = getStances(segmentB);
 
             const aggA = aggregateEdges(edgesA), aggB = aggregateEdges(edgesB);
             degreeA = degreeFromLinks(aggA);
@@ -381,7 +466,7 @@ function polarityColor(mean) {
             .on("mouseenter", (event, d) => showTooltip(event, `
                 <div class="tt-rel">${d.relation}</div>
                 <div class="tt-label">${getNodeLabel(d.source)} &rarr; ${getNodeLabel(d.target)}</div>
-                <div class="tt-type">${d.count} mention(s) | ${d.unique_speakers} speaker(s) | polarity: ${fmtPol(d.mean_polarity)}${comparing ? " | " + presenceLabel(d.presence, document.getElementById("filter-demographic").value, document.getElementById("filter-compare").value) : ""}</div>`))
+                <div class="tt-type">${d.count} mention(s) | ${d.unique_speakers} speaker(s) | polarity: ${fmtPol(d.mean_polarity)}${comparing ? " | " + presenceLabel(d.presence) : ""}</div>`))
             .on("mousemove", moveTooltip).on("mouseleave", hideTooltip)
             .on("click", (event, d) => { hideTooltip(); openEdgeModal(d, comparing); });
         linkEnter.merge(linkSel)
@@ -481,10 +566,10 @@ function polarityColor(mean) {
 
     function nodeColor(type) { return NODE_TYPE_COLORS[type] || "#8899a6"; }
     function presenceColor(p) { return p === "a" ? GROUP_A_COLOR : p === "b" ? GROUP_B_COLOR : BOTH_COLOR; }
-    function presenceLabel(p, a, b) {
-        if (p === "a") return `only ${a === "all" ? "A" : a}`;
-        if (p === "b") return `only ${b}`;
-        return "both groups";
+    function presenceLabel(p) {
+        if (p === "a") return `only A (${curDescA})`;
+        if (p === "b") return `only B (${curDescB})`;
+        return "both segments";
     }
     function fmtPol(v) {
         if (v == null || isNaN(v)) return "n/a";
@@ -546,7 +631,7 @@ function polarityColor(mean) {
                 <div class="stat-card"><div class="stat-val">${edge.unique_speakers}</div><div class="stat-lbl">Speakers</div></div>
                 <div class="stat-card"><div class="stat-val">${fmtPol(edge.mean_polarity).split(" ")[0]}</div><div class="stat-lbl">Polarity</div></div>
             </div>
-            ${comparing ? `<div class="modal-section" style="margin-top:16px;"><span class="modal-badge badge-stance">${presenceLabel(edge.presence, document.getElementById("filter-demographic").value, document.getElementById("filter-compare").value)}</span></div>` : ""}
+            ${comparing ? `<div class="modal-section" style="margin-top:16px;"><span class="modal-badge badge-stance">${presenceLabel(edge.presence)}</span></div>` : ""}
             <div class="modal-section"><h4>Evidence (${edge.evidence.length})</h4>${evidenceHtml}</div>`);
     }
 
@@ -564,7 +649,7 @@ function polarityColor(mean) {
         }
     }
 
-    ["filter-demographic", "filter-compare", "color-mode", "filter-entity-type", "filter-round", "filter-table", "filter-speaker", "filter-stance"].forEach(id => {
+    ["color-mode", "filter-entity-type", "filter-round", "filter-table", "filter-speaker", "filter-stance", "toggle-compare"].forEach(id => {
         document.getElementById(id).addEventListener("change", update);
     });
     document.getElementById("filter-confidence").addEventListener("input", (e) => {

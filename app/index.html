@@ -17,6 +17,8 @@
         .filter-group.primary label { color: #1d4ed8; font-weight: 600; font-size: 13px; }
         .filter-group.primary select { background: #ffffff; border-color: #93c5fd; font-weight: 500; }
         .segment-hint { font-size: 11px; color: #6b7280; margin-top: 6px; line-height: 1.4; }
+        #segment-a-dims label, #segment-b-dims label { display: block; font-size: 11px; color: #1d4ed8; font-weight: 600; margin-bottom: 2px; }
+        #segment-a-dims select, #segment-b-dims select { width: 100%; padding: 6px; margin-bottom: 8px; background: #ffffff; border: 1px solid #93c5fd; border-radius: 4px; font-size: 13px; color: #1a1a2e; }
         .legend { margin-top: 8px; }
         .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; color: #374151; }
         .legend-swatch { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; border: 1px solid rgba(0,0,0,0.08); }
@@ -129,19 +131,19 @@
             <h2>Segment</h2>
 
             <div class="filter-group primary">
-                <label>Political affiliation</label>
-                <select id="filter-demographic">
-                    <option value="all">All participants</option>
-                </select>
-                <p class="segment-hint">Compare how the causal map changes across respondent groups. Nodes stay fixed; weights update for the selected segment.</p>
+                <div id="segment-a-dims"></div>
+                <p class="segment-hint">Intersect demographic dimensions to define a segment. "Any" ignores that dimension. Nodes stay fixed; weights update for the selected segment.</p>
             </div>
 
             <div class="filter-group primary">
-                <label>Compare against</label>
-                <select id="filter-compare">
-                    <option value="none">No comparison</option>
-                </select>
-                <p class="segment-hint">When set, edges are coloured by which group asserts them and nodes by how much the two groups' positions diverge.</p>
+                <div class="toggle-row">
+                    <input type="checkbox" id="toggle-compare">
+                    <label for="toggle-compare"><strong>Compare against segment B</strong></label>
+                </div>
+                <div id="segment-b-wrap" style="display:none; margin-top:10px;">
+                    <div id="segment-b-dims"></div>
+                    <p class="segment-hint">Edges are coloured by which segment asserts them; nodes are ringed where the two segments' positions diverge.</p>
+                </div>
             </div>
 
             <h2>Filters</h2>
